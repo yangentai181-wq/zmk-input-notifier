@@ -87,8 +87,24 @@ static void pointer_flush_work(struct k_work *work) {
     k_spin_unlock(&pointer_lock, key);
 }
 
+static uint8_t dbg_pcb_buf[CONFIG_RAW_HID_REPORT_SIZE];
+
 static void pointer_cb(struct input_event *evt) {
     if (!evt) return;
+
+    /* DEBUG: emit a 0xFD marker on every invocation so the host can see
+     * whether the listener is wired up at all, independent of the flush
+     * timer / accumulator logic. Safe to remove once trackball is verified. */
+    memset(dbg_pcb_buf, 0, sizeof(dbg_pcb_buf));
+    dbg_pcb_buf[0] = 0xFD;
+    dbg_pcb_buf[1] = (uint8_t)evt->type;
+    dbg_pcb_buf[2] = (uint8_t)(evt->code & 0xFF);
+    dbg_pcb_buf[3] = (uint8_t)(evt->value & 0xFF);
+    dbg_pcb_buf[4] = evt->sync ? 1 : 0;
+    raise_raw_hid_sent_event((struct raw_hid_sent_event){
+        .data = dbg_pcb_buf,
+        .length = sizeof(dbg_pcb_buf),
+    });
 
     bool merged = false;
     k_spinlock_key_t key = k_spin_lock(&pointer_lock);
