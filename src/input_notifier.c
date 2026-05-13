@@ -1,8 +1,8 @@
 /*
  * zmk-input-notifier
  *
- * Streams PMW3610 (or any Zephyr input subsystem source) pointer deltas
- * and ZMK rotary-encoder ticks over the existing zmk-raw-hid channel
+ * Streams PMW3610 (or any pixart,pmw3610 compatible) pointer deltas and
+ * ZMK rotary-encoder ticks over the existing zmk-raw-hid channel
  * (vendor usage page 0xFF60).
  */
 
@@ -29,18 +29,13 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static uint8_t hid_pointer_buf[CONFIG_RAW_HID_REPORT_SIZE];
 static uint8_t hid_encoder_buf[CONFIG_RAW_HID_REPORT_SIZE];
 
-/* Accumulators for one logical pointer frame (between two SYN events) plus
- * any extra frames that arrive while the throttle work item is pending. */
+/* Accumulators for one logical pointer frame (between two SYN events). */
 static int32_t acc_dx;
 static int32_t acc_dy;
 static int32_t acc_wheel;
 static int32_t acc_hwheel;
 static uint8_t acc_buttons;
 static struct k_spinlock pointer_lock;
-
-static void pointer_flush_work(struct k_work *work);
-static K_WORK_DELAYABLE_DEFINE(pointer_flush, pointer_flush_work);
-static bool pointer_flush_pending;
 
 static int16_t clamp_i16(int32_t v) {
     if (v > INT16_MAX) return INT16_MAX;
@@ -49,8 +44,6 @@ static int16_t clamp_i16(int32_t v) {
 }
 
 static void send_pointer_locked(void) {
-    /* Caller holds pointer_lock or we are inside the work item which is
-     * the only consumer. */
     int16_t dx = clamp_i16(acc_dx);
     int16_t dy = clamp_i16(acc_dy);
     int16_t wheel = clamp_i16(acc_wheel);
@@ -76,35 +69,8 @@ static void send_pointer_locked(void) {
     });
 }
 
-static void pointer_flush_work(struct k_work *work) {
-    ARG_UNUSED(work);
-    k_spinlock_key_t key = k_spin_lock(&pointer_lock);
-    pointer_flush_pending = false;
-    bool has_data = acc_dx || acc_dy || acc_wheel || acc_hwheel;
-    if (has_data) {
-        send_pointer_locked();
-    }
-    k_spin_unlock(&pointer_lock, key);
-}
-
-static uint8_t dbg_pcb_buf[CONFIG_RAW_HID_REPORT_SIZE];
-
 static void pointer_cb(struct input_event *evt) {
     if (!evt) return;
-
-    /* DEBUG: emit a 0xFD marker on every invocation so the host can see
-     * whether the listener is wired up at all, independent of the flush
-     * timer / accumulator logic. Safe to remove once trackball is verified. */
-    memset(dbg_pcb_buf, 0, sizeof(dbg_pcb_buf));
-    dbg_pcb_buf[0] = 0xFD;
-    dbg_pcb_buf[1] = (uint8_t)evt->type;
-    dbg_pcb_buf[2] = (uint8_t)(evt->code & 0xFF);
-    dbg_pcb_buf[3] = (uint8_t)(evt->value & 0xFF);
-    dbg_pcb_buf[4] = evt->sync ? 1 : 0;
-    raise_raw_hid_sent_event((struct raw_hid_sent_event){
-        .data = dbg_pcb_buf,
-        .length = sizeof(dbg_pcb_buf),
-    });
 
     bool merged = false;
     k_spinlock_key_t key = k_spin_lock(&pointer_lock);
@@ -143,17 +109,12 @@ static void pointer_cb(struct input_event *evt) {
     default:
         break;
     }
-    k_spin_unlock(&pointer_lock, key);
 
-    if (!merged || !evt->sync) return;
+    if (!merged || !evt->sync) {
+        k_spin_unlock(&pointer_lock, key);
+        return;
+    }
 
-    /* Flush synchronously on every SYN frame. The original throttled
-     * k_work_schedule path appeared not to fire in this build (likely a
-     * work-queue ownership issue inside ZMK's pointer path), so we send
-     * directly from the listener thread context. PMW3610 frames at
-     * ~125 Hz which the Raw HID stack handles fine for USB and is
-     * acceptable for BLE for short bursts. */
-    key = k_spin_lock(&pointer_lock);
     bool has_data = acc_dx || acc_dy || acc_wheel || acc_hwheel;
     if (has_data) {
         send_pointer_locked();
@@ -161,12 +122,10 @@ static void pointer_cb(struct input_event *evt) {
     k_spin_unlock(&pointer_lock, key);
 }
 
-/* Some ZMK pointer-related code paths appear to filter / consume events
- * before they reach a dev=NULL broadcast listener. Register one listener
- * per pixart,pmw3610 node (the typical trackball compatible used by
- * hyhy-masa/minimal-keys and friends) so we get fired directly from the
- * driver's input_report_rel() call. The macro is a no-op on builds
- * without that compatible. */
+/* INPUT_CALLBACK_DEFINE(NULL, ...) didn't fire for trackball deltas on
+ * this stack (ZMK v0.3 + Zephyr v3.5), so bind one listener per
+ * pixart,pmw3610 device. The macro expands to nothing on builds that
+ * don't have such a node. */
 #define ZIN_POINTER_LISTENER(node_id) \
     INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(node_id), pointer_cb);
 DT_FOREACH_STATUS_OKAY(pixart_pmw3610, ZIN_POINTER_LISTENER)

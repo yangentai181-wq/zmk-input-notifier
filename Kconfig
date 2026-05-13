@@ -6,21 +6,8 @@ config ZMK_INPUT_NOTIFIER
     default y if !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
     select RAW_HID
     help
-      Hooks the Zephyr input subsystem and the ZMK sensor event bus to
-      stream live pointer deltas (marker 0xF2) and encoder ticks
+      Hooks each pixart,pmw3610 input device and the ZMK sensor event
+      bus to stream live pointer deltas (marker 0xF2) and encoder ticks
       (marker 0xF3) over the existing 32-byte Raw HID interface.
-
-if ZMK_INPUT_NOTIFIER
-
-config ZMK_INPUT_NOTIFIER_MOUSE_BURST_MS
-    int "Minimum interval between mouse delta packets (ms)"
-    default 8
-    range 0 100
-    help
-      Coalesce pointer deltas inside this window before emitting a
-      single Raw HID frame. 0 disables coalescing (one packet per
-      input sync). Set to ~8 for USB, ~16 for BLE-only setups.
-
-endif
 
 endmenu
