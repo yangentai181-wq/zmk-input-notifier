@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/input/input.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/kernel.h>
@@ -145,9 +146,15 @@ static void pointer_cb(struct input_event *evt) {
     k_spin_unlock(&pointer_lock, key);
 }
 
-/* dev=NULL means listen to every input device — that covers PMW3610 and any
- * future pointer drivers without referencing a specific compatible. */
-INPUT_CALLBACK_DEFINE(NULL, pointer_cb);
+/* Some ZMK pointer-related code paths appear to filter / consume events
+ * before they reach a dev=NULL broadcast listener. Register one listener
+ * per pixart,pmw3610 node (the typical trackball compatible used by
+ * hyhy-masa/minimal-keys and friends) so we get fired directly from the
+ * driver's input_report_rel() call. The macro is a no-op on builds
+ * without that compatible. */
+#define ZIN_POINTER_LISTENER(node_id) \
+    INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(node_id), pointer_cb);
+DT_FOREACH_STATUS_OKAY(pixart_pmw3610, ZIN_POINTER_LISTENER)
 
 /* ---------- Encoder ---------- */
 
