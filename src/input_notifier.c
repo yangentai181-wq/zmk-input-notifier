@@ -147,17 +147,16 @@ static void pointer_cb(struct input_event *evt) {
 
     if (!merged || !evt->sync) return;
 
-    /* SYN event finalizes the frame. Throttle to BURST_MS to bound the
-     * effective send rate over BLE without dropping any motion. */
-    const k_timeout_t delay =
-        CONFIG_ZMK_INPUT_NOTIFIER_MOUSE_BURST_MS == 0
-            ? K_NO_WAIT
-            : K_MSEC(CONFIG_ZMK_INPUT_NOTIFIER_MOUSE_BURST_MS);
-
+    /* Flush synchronously on every SYN frame. The original throttled
+     * k_work_schedule path appeared not to fire in this build (likely a
+     * work-queue ownership issue inside ZMK's pointer path), so we send
+     * directly from the listener thread context. PMW3610 frames at
+     * ~125 Hz which the Raw HID stack handles fine for USB and is
+     * acceptable for BLE for short bursts. */
     key = k_spin_lock(&pointer_lock);
-    if (!pointer_flush_pending) {
-        pointer_flush_pending = true;
-        k_work_schedule(&pointer_flush, delay);
+    bool has_data = acc_dx || acc_dy || acc_wheel || acc_hwheel;
+    if (has_data) {
+        send_pointer_locked();
     }
     k_spin_unlock(&pointer_lock, key);
 }
