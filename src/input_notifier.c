@@ -86,8 +86,7 @@ static void pointer_flush_work(struct k_work *work) {
     k_spin_unlock(&pointer_lock, key);
 }
 
-static void pointer_cb(struct input_event *evt, void *user_data) {
-    ARG_UNUSED(user_data);
+static void pointer_cb(struct input_event *evt) {
     if (!evt) return;
 
     bool merged = false;
@@ -148,7 +147,7 @@ static void pointer_cb(struct input_event *evt, void *user_data) {
 
 /* dev=NULL means listen to every input device — that covers PMW3610 and any
  * future pointer drivers without referencing a specific compatible. */
-INPUT_CALLBACK_DEFINE(NULL, pointer_cb, NULL);
+INPUT_CALLBACK_DEFINE(NULL, pointer_cb);
 
 /* ---------- Encoder ---------- */
 
