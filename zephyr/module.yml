@@ -1,0 +1,4 @@
+name: zmk-input-notifier
+build:
+  cmake: .
+  kconfig: Kconfig
